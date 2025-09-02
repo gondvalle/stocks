@@ -1,18 +1,16 @@
-# /sp500_screener/ui/pages/screener.py
 import streamlit as st
 import pandas as pd
-from core.reporting import build_universe, score_and_rank
+from core.reporting import get_or_make_daily_scored
 
 def render():
     st.header("Screener")
     with st.expander("Filtros", expanded=True):
-        c1, c2, c3, c4 = st.columns(4)
-        max_names = c1.slider("Nº máximo", 50, 500, 200, step=50)
-        min_score = c2.slider("Score mínimo", 0.0, 1.0, 0.5, 0.05)
-        sector_sel = c3.text_input("Filtrar Sector (contiene)", "")
-        contains = c4.text_input("Ticker / Nombre contiene", "")
-    with st.spinner("Calculando..."):
-        df = score_and_rank(build_universe(max_names=max_names))
+        c1, c2, c3 = st.columns(3)
+        min_score = c1.slider("Score mínimo", 0.0, 1.0, 0.5, 0.05)
+        sector_sel = c2.text_input("Filtrar Sector (contiene)", "")
+        contains = c3.text_input("Ticker / Nombre contiene", "")
+
+    df = get_or_make_daily_scored(force_refresh=False)
 
     if sector_sel:
         df = df[df["Sector"].fillna("").str.contains(sector_sel, case=False, na=False)]
