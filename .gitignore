@@ -4,3 +4,8 @@ node_modules/
 
 __pycache__/
 *.pyc
+
+# Cache local de la app
+data/cache/
+data/cache/**
+.streamlit/

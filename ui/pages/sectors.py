@@ -1,16 +1,23 @@
-# /sp500_screener/ui/pages/sectors.py
-import streamlit as st
-from core.reporting import build_universe, score_and_rank
-from ui.charts import boxplot_by_sector
+# /sp500_screener/core/sectors.py
+from __future__ import annotations
+import numpy as np
+import pandas as pd
 
-def render():
-    st.header("Comparativas por Sector")
-    with st.expander("Parámetros", expanded=True):
-        c1, c2 = st.columns(2)
-        max_names = c1.slider("Nº máximo", 50, 500, 200, step=50)
-        metric = c2.selectbox("Métrica", ["pe_ttm","ev_ebitda_ttm","p_fcf","p_b","de_ratio","current_ratio","interest_coverage","fcf_margin","cfo_ni_ratio","roic","wacc_proxy","rev_cagr","eps_cagr"])
-
-    with st.spinner("Cargando datos..."):
-        df = score_and_rank(build_universe(max_names=max_names))
-
-    st.plotly_chart(boxplot_by_sector(df, metric, title=f"{metric} por sector"), use_container_width=True)
+def sector_medians(df: pd.DataFrame) -> dict:
+    """Medianas por sector para métricas clave (para comparativas y scoring)."""
+    metrics = [
+        "pe_ttm","ev_ebitda_ttm","p_fcf","p_b","de_ratio","current_ratio",
+        "interest_coverage","fcf_margin","cfo_ni_ratio",
+    ]
+    out = {}
+    # dropna=False para no perder filas con Sector NaN (por si acaso)
+    for sector, sub in df.groupby("Sector", dropna=False):
+        out[sector] = {}
+        for m in metrics:
+            if m in sub.columns:
+                # to_numeric + median(skipna=True) => sin warnings si todo es NaN
+                med = pd.to_numeric(sub[m], errors="coerce").median(skipna=True)
+            else:
+                med = np.nan
+            out[sector][f"{m}_median"] = float(med) if pd.notna(med) else np.nan
+    return out
