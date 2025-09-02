@@ -103,11 +103,14 @@ def build_universe(max_names: int = 500, max_workers: int = 8, progress_cb=None)
 
 
 def score_and_rank(df: pd.DataFrame) -> pd.DataFrame:
-    meds = sector_medians(df)
+    # Versión estricta: recalcula medianas por fila excluyendo el propio ticker
     scores, checks = [], []
     for _, row in df.iterrows():
-        s, ch = evaluate_company(row.to_dict(), meds)
+        # medianas del sector SIN esta compañía
+        sect_meds_excl = sector_medians(df[df["Ticker"] != row["Ticker"]])
+        s, ch = evaluate_company(row.to_dict(), sect_meds_excl)
         scores.append(s); checks.append(ch)
+
     out = df.copy()
     out["score"] = scores
     out["checks"] = checks

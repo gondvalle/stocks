@@ -1,17 +1,34 @@
+# /sp500_screener/ui/pages/stock_detail.py
 import streamlit as st
 import numpy as np
 import pandas as pd
-from core.fetch import yf_price_and_target, yf_financials
-from core.metrics import compute_history_pe_yf, compute_margins_and_trends, compute_growth, compute_operating_leverage, compute_cash_quality_and_fcf, compute_balance_ratios, compute_roic_wacc_proxy, compute_p_fcf, compute_buybacks
-from ui.components import show_check_line
+
+from core.fetch import yf_price_and_target, yf_financials, get_price_history_close
+from core.metrics import (
+    compute_history_pe_yf, compute_margins_and_trends, compute_growth,
+    compute_operating_leverage, compute_cash_quality_and_fcf,
+    compute_balance_ratios, compute_roic_wacc_proxy, compute_p_fcf, compute_buybacks
+)
 from core.scoring import evaluate_company
 from core.sectors import sector_medians
-from core.fetch import get_price_history_close
-from ui.charts import price_timeseries
+from core.reporting import get_or_make_daily_scored
+from ui.components import show_check_line
+from ui.charts import (
+    price_timeseries,
+    bar_forwardpe_vs_hist,
+    boxplot_sector_with_point,   # ya lo tienes y lo usamos también
+    boxplot_sector_metric,       # nuevo helper
+    scatter_cfo_ni_vs_de,
+    scatter_fcf_margin_vs_de,
+)
+from core.sectors import sector_medians
+from core.reporting import get_or_make_daily_scored
+
 
 def render(ticker: str | None = None):
     st.header("Detalle de Acción")
 
+    # Ticker desde session/query o input
     qp_t = st.session_state.get("selected_ticker") or st.query_params.get("ticker") or ticker
     t = st.text_input("Ticker", value=qp_t or "")
     go = st.button("Cargar")
@@ -23,6 +40,10 @@ def render(ticker: str | None = None):
         return
     if not go and qp_t:
         t = qp_t
+
+    # Carga el dataframe del día y sus medianas de sector
+    df_today = get_or_make_daily_scored(force_refresh=False)
+    meds_today = sector_medians(df_today, exclude_ticker=t)
 
     with st.spinner(f"Cargando {t}..."):
         price, target = yf_price_and_target(t)
@@ -40,33 +61,94 @@ def render(ticker: str | None = None):
         sh_tr = compute_buybacks(shares)
 
         row = {
-            "Ticker": t, "Name": info.get("longName") or info.get("shortName") or t, "Sector": info.get("sector") or "Unknown",
-            "price": price, "target_mean": target, "pe_ttm": info.get("trailingPE"), "forward_pe": info.get("forwardPE"),
-            "pe_10y": pe10, "pe_5y": pe5, "ev_ebitda_ttm": balrat.get("ev_ebitda_ttm"), "p_fcf": p_fcf, "p_b": balrat.get("p_b"),
-            "de_ratio": balrat.get("de_ratio"), "interest_coverage": balrat.get("interest_coverage"), "current_ratio": balrat.get("current_ratio"),
-            "cfo_ni_ratio": cashq.get("cfo_ni_ratio"), "fcf_margin": cashq.get("fcf_margin"), "roic": roic_wacc.get("roic"),
-            "wacc_proxy": roic_wacc.get("wacc_proxy"), "rev_cagr": growth.get("rev_cagr"), "eps_cagr": growth.get("eps_cagr"),
-            "op_leverage": op_lev.get("op_leverage"), "shares_out_trend": sh_tr,
-            "grossProfitMargin_trend": margins.get("grossProfitMargin_trend"), "operatingProfitMargin_trend": margins.get("operatingProfitMargin_trend"),
-            "netProfitMargin_trend": margins.get("netProfitMargin_trend"), "peg": ( (info.get("forwardPE") or np.nan) / ( (growth.get("eps_cagr")*100) if (growth.get("eps_cagr") is not None and growth["eps_cagr"]<1) else (growth.get("eps_cagr") or np.nan) ) ) if (info.get("forwardPE") and growth.get("eps_cagr") and growth["eps_cagr"]>0) else np.nan
+            "Ticker": t,
+            "Name": info.get("longName") or info.get("shortName") or t,
+            "Sector": info.get("sector") or "Unknown",
+            "price": price,
+            "target_mean": target,
+            "pe_ttm": info.get("trailingPE"),
+            "forward_pe": info.get("forwardPE"),
+            "pe_10y": pe10, "pe_5y": pe5,
+            "ev_ebitda_ttm": balrat.get("ev_ebitda_ttm"),
+            "p_fcf": p_fcf, "p_b": balrat.get("p_b"),
+            "de_ratio": balrat.get("de_ratio"),
+            "interest_coverage": balrat.get("interest_coverage"),
+            "current_ratio": balrat.get("current_ratio"),
+            "cfo_ni_ratio": cashq.get("cfo_ni_ratio"),
+            "fcf_margin": cashq.get("fcf_margin"),
+            "roic": roic_wacc.get("roic"),
+            "wacc_proxy": roic_wacc.get("wacc_proxy"),
+            "rev_cagr": growth.get("rev_cagr"),
+            "eps_cagr": growth.get("eps_cagr"),
+            "op_leverage": op_lev.get("op_leverage"),
+            "shares_out_trend": sh_tr,
+            "beta": info.get("beta"),
         }
+        # PEG (misma lógica que el motor)
+        if info.get("forwardPE") and growth.get("eps_cagr") and growth["eps_cagr"] > 0:
+            g = growth["eps_cagr"]
+            row["peg"] = info["forwardPE"] / (g*100 if g < 1 else g)
+        else:
+            row["peg"] = np.nan
 
-        # sector stats de esta única fila (no muy informativo), pero construimos a mano:
-        sect_stats = { row["Sector"]: {
-            "pe_ttm_median": row["pe_ttm"], "ev_ebitda_ttm_median": row["ev_ebitda_ttm"],
-            "p_fcf_median": row["p_fcf"], "p_b_median": row["p_b"],
-        } }
-        score, checks = evaluate_company(row, sect_stats)
+        # Score/Checks con medianas reales del día
+        score_calc, checks = evaluate_company(row, meds_today)
+
+        # Si el ticker ya está en el DF del día, muestra su score "oficial" del día
+        score_today = df_today.loc[df_today["Ticker"] == t, "score"]
+        if not score_today.empty and np.isfinite(score_today.iloc[0]):
+            score = float(score_today.iloc[0])
+        else:
+            score = float(score_calc)
+
+     # --- NUEVA SECCIÓN: Comparativas visuales ---
+    st.subheader("Comparativas visuales frente a su sector")
+
+    sector = row["Sector"]
+    label = row["Ticker"]
+
+    # 1) Forward P/E vs histórico + referencia sector (P/E TTM mediana)
+    st.plotly_chart(bar_forwardpe_vs_hist(row, meds_today), use_container_width=True)
+
+    # 2) P/E TTM vs sector (boxplot + punto)
+    st.plotly_chart(
+        boxplot_sector_with_point(
+            df_today, sector=sector, column="pe_ttm",
+            point_value=row.get("pe_ttm", np.nan), label=label
+        ),
+        use_container_width=True
+    )
+
+    # 3) EV/EBITDA vs sector (boxplot + punto)
+    st.plotly_chart(
+        boxplot_sector_with_point(
+            df_today, sector=sector, column="ev_ebitda_ttm",
+            point_value=row.get("ev_ebitda_ttm", np.nan), label=label
+        ),
+        use_container_width=True
+    )
+
+    # 4) Cashflow vs deuda: CFO/NI vs D/E (dispersión con la empresa resaltada)
+    st.plotly_chart(
+        scatter_cfo_ni_vs_de(df_today, sector=sector, ticker=label),
+        use_container_width=True
+    )
+
+    # 5) Alternativa/extra: FCF margin vs D/E (otra vista de caja vs deuda)
+    st.plotly_chart(
+        scatter_fcf_margin_vs_de(df_today, sector=sector, ticker=label),
+        use_container_width=True
+    )
 
     c0, c1, c2, c3 = st.columns([1,1,1,1])
-    c0.metric("Precio", f"{price:.2f}" if price==price else "n/d")
-    c1.metric("Target (mean)", f"{target:.2f}" if target==target else "n/d")
-    c2.metric("Upside", f"{(target/price-1)*100:.1f}%" if (price and target and price>0) else "n/d")
-    c3.metric("Score", f"{score:.3f}")
+    c0.metric("Precio", f"{price:.2f}" if price == price else "n/d")
+    c1.metric("Target (mean)", f"{target:.2f}" if target == target else "n/d")
+    c2.metric("Upside", f"{(target/price-1)*100:.1f}%" if (price and target and price > 0) else "n/d")
+    c3.metric("Score (día)", f"{score:.3f}")
 
     st.subheader(f"{row['Ticker']} · {row['Name']}  —  Sector: {row['Sector']}")
-    left, right = st.columns([1,1])
 
+    left, right = st.columns([1,1])
     with left:
         show_check_line("Forward P/E", row.get("forward_pe"), checks.get("fpe_vs_hist"), "{:.2f}")
         show_check_line("P/E TTM", row.get("pe_ttm"), checks.get("pe_vs_sector"), "{:.2f}")
@@ -103,8 +185,6 @@ def render(ticker: str | None = None):
     c6.metric("Apalancamiento operativo", f"{(row.get('op_leverage') or 0)*100:+.1f}%" if row.get('op_leverage')==row.get('op_leverage') else "n/d")
     c7.metric("Tendencia acciones (≈ recompras <0)", f"{(row.get('shares_out_trend') or 0)*100:+.1f}%" if row.get('shares_out_trend')==row.get('shares_out_trend') else "n/d")
 
-    # Precio histórico
     st.subheader("Precio")
     hist = get_price_history_close(t)
     st.plotly_chart(price_timeseries(hist, title=f"Precio histórico de {t}"), use_container_width=True)
-
