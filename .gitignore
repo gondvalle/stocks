@@ -9,3 +9,7 @@ __pycache__/
 data/cache/
 data/cache/**
 .streamlit/
+
+# Resultados diarios (no versionar)
+data/daily/
+data/daily/**

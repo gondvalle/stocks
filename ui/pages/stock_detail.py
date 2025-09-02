@@ -1,4 +1,3 @@
-# /sp500_screener/ui/pages/stock_detail.py
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -7,6 +6,8 @@ from core.metrics import compute_history_pe_yf, compute_margins_and_trends, comp
 from ui.components import show_check_line
 from core.scoring import evaluate_company
 from core.sectors import sector_medians
+from core.fetch import get_price_history_close
+from ui.charts import price_timeseries
 
 def render(ticker: str | None = None):
     st.header("Detalle de Acción")
@@ -84,13 +85,13 @@ def render(ticker: str | None = None):
         show_check_line("Current ratio", row.get("current_ratio"), checks.get("current_ratio"), "{:.2f}")
 
     st.caption("Tendencias de márgenes (~5 años):")
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Bruto (últ.)", f"{margins.get('grossProfitMargin_last', np.nan)*100:.1f}%" if margins.get('grossProfitMargin_last')==margins.get('grossProfitMargin_last') else "n/d")
-    c1.metric("Bruto (trend)", f"{margins.get('grossProfitMargin_trend', np.nan)*100:+.1f}%" if margins.get('grossProfitMargin_trend')==margins.get('grossProfitMargin_trend') else "n/d")
-    c2.metric("Operativo (últ.)", f"{margins.get('operatingProfitMargin_last', np.nan)*100:.1f}%" if margins.get('operatingProfitMargin_last')==margins.get('operatingProfitMargin_last') else "n/d")
-    c2.metric("Operativo (trend)", f"{margins.get('operatingProfitMargin_trend', np.nan)*100:+.1f}%" if margins.get('operatingProfitMargin_trend')==margins.get('operatingProfitMargin_trend') else "n/d")
-    c3.metric("Neto (últ.)", f"{margins.get('netProfitMargin_last', np.nan)*100:.1f}%" if margins.get('netProfitMargin_last')==margins.get('netProfitMargin_last') else "n/d")
-    c3.metric("Neto (trend)", f"{margins.get('netProfitMargin_trend', np.nan)*100:+.1f}%" if margins.get('netProfitMargin_trend')==margins.get('netProfitMargin_trend') else "n/d")
+    c1_, c2_, c3_ = st.columns(3)
+    c1_.metric("Bruto (últ.)", f"{row.get('grossProfitMargin_last', np.nan)*100:.1f}%" if row.get('grossProfitMargin_last')==row.get('grossProfitMargin_last') else "n/d")
+    c1_.metric("Bruto (trend)", f"{row.get('grossProfitMargin_trend', np.nan)*100:+.1f}%" if row.get('grossProfitMargin_trend')==row.get('grossProfitMargin_trend') else "n/d")
+    c2_.metric("Operativo (últ.)", f"{row.get('operatingProfitMargin_last', np.nan)*100:.1f}%" if row.get('operatingProfitMargin_last')==row.get('operatingProfitMargin_last') else "n/d")
+    c2_.metric("Operativo (trend)", f"{row.get('operatingProfitMargin_trend', np.nan)*100:+.1f}%" if row.get('operatingProfitMargin_trend')==row.get('operatingProfitMargin_trend') else "n/d")
+    c3_.metric("Neto (últ.)", f"{row.get('netProfitMargin_last', np.nan)*100:.1f}%" if row.get('netProfitMargin_last')==row.get('netProfitMargin_last') else "n/d")
+    c3_.metric("Neto (trend)", f"{row.get('netProfitMargin_trend', np.nan)*100:+.1f}%" if row.get('netProfitMargin_trend')==row.get('netProfitMargin_trend') else "n/d")
 
     st.caption("Crecimiento (~5 años):")
     c4, c5 = st.columns(2)
@@ -101,3 +102,9 @@ def render(ticker: str | None = None):
     c6, c7 = st.columns(2)
     c6.metric("Apalancamiento operativo", f"{(row.get('op_leverage') or 0)*100:+.1f}%" if row.get('op_leverage')==row.get('op_leverage') else "n/d")
     c7.metric("Tendencia acciones (≈ recompras <0)", f"{(row.get('shares_out_trend') or 0)*100:+.1f}%" if row.get('shares_out_trend')==row.get('shares_out_trend') else "n/d")
+
+    # Precio histórico
+    st.subheader("Precio")
+    hist = get_price_history_close(t)
+    st.plotly_chart(price_timeseries(hist, title=f"Precio histórico de {t}"), use_container_width=True)
+

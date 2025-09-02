@@ -2,6 +2,7 @@
 import streamlit as st
 import shutil
 from core.config import CACHE_DIR
+from core.reporting import get_or_make_daily_scored
 
 def render():
     st.header("Ajustes")
@@ -14,3 +15,8 @@ def render():
             st.success("Caché invalidada.")
         except Exception as e:
             st.error(f"No se pudo invalidar la caché: {e}")
+
+    if st.button("Recalcular hoy (forzar)"):
+        with st.spinner("Recalculando universo y guardando cache diaria..."):
+            df = get_or_make_daily_scored(force_refresh=True)
+        st.success(f"Recalculado {len(df)} tickers y guardado en caché diaria.")

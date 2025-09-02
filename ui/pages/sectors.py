@@ -1,23 +1,41 @@
-# /sp500_screener/core/sectors.py
 from __future__ import annotations
-import numpy as np
+import streamlit as st
 import pandas as pd
+from ui.charts import boxplot_sector_with_point, price_timeseries
+from core.reporting import get_or_make_daily_scored
+from core.fetch import get_price_history_close
 
-def sector_medians(df: pd.DataFrame) -> dict:
-    """Medianas por sector para métricas clave (para comparativas y scoring)."""
-    metrics = [
-        "pe_ttm","ev_ebitda_ttm","p_fcf","p_b","de_ratio","current_ratio",
-        "interest_coverage","fcf_margin","cfo_ni_ratio",
-    ]
-    out = {}
-    # dropna=False para no perder filas con Sector NaN (por si acaso)
-    for sector, sub in df.groupby("Sector", dropna=False):
-        out[sector] = {}
-        for m in metrics:
-            if m in sub.columns:
-                # to_numeric + median(skipna=True) => sin warnings si todo es NaN
-                med = pd.to_numeric(sub[m], errors="coerce").median(skipna=True)
-            else:
-                med = np.nan
-            out[sector][f"{m}_median"] = float(med) if pd.notna(med) else np.nan
-    return out
+def render():
+    st.header("Comparativas por sector (empresa a empresa)")
+
+    df = get_or_make_daily_scored(force_refresh=False)
+    all_tickers = df["Ticker"].tolist()
+
+    c1, c2 = st.columns([2,1])
+    with c1:
+        sel = st.multiselect("Selecciona compañías para comparar (una a una):", all_tickers, default=all_tickers[:3])
+    with c2:
+        metrics = ["pe_ttm","forward_pe","ev_ebitda_ttm","p_fcf","p_b","fcf_margin","cfo_ni_ratio","roic","rev_cagr","eps_cagr"]
+        metric = st.selectbox("Métrica a resaltar vs sector:", metrics, index=0)
+
+    if not sel:
+        st.info("Elige al menos una compañía.")
+        return
+
+    for t in sel:
+        sub = df[df["Ticker"] == t]
+        if sub.empty:
+            continue
+        row = sub.iloc[0]
+        sector = row.get("Sector", "Unknown")
+        val = row.get(metric)
+        name = row.get("Name", t)
+
+        st.subheader(f"{t} — {name}  (Sector: {sector})")
+        st.plotly_chart(
+            boxplot_sector_with_point(df, sector=sector, column=metric, point_value=val, label=t),
+            use_container_width=True
+        )
+        hist = get_price_history_close(t)
+        st.plotly_chart(price_timeseries(hist, title=f"Precio histórico de {t}"), use_container_width=True)
+
