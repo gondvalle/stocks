@@ -1,12 +1,7 @@
-"""Carga de constituyentes del S&P 500."""
+# /sp500_screener/core/constituents.py
 from __future__ import annotations
-
-import os
-import io
-import pandas as pd
-import requests
-from .constants import SP500_GITHUB_CSV
-
+import os, io, requests, pandas as pd
+from .constants import SP500_GITHUB_CSV, LOCAL_SP500_CSV
 
 def _get_csv(url: str, timeout: int = 20) -> pd.DataFrame | None:
     try:
@@ -16,12 +11,10 @@ def _get_csv(url: str, timeout: int = 20) -> pd.DataFrame | None:
     except Exception:
         return None
 
-
-def load_sp500_constituents(local_csv: str = "data/sp500_constituents.csv", limit: int | None = None) -> pd.DataFrame:
-    """Devuelve DF con columnas: Ticker, Name, Sector."""
-    cols_norm = {"symbol": "Ticker", "Symbol": "Ticker", "ticker": "Ticker",
-                 "name": "Name", "Name": "Name", "sector": "Sector", "Sector": "Sector"}
-
+def load_sp500_constituents(local_csv: str = LOCAL_SP500_CSV, limit: int | None = None) -> pd.DataFrame:
+    """Devuelve DF con columnas: Ticker, Name, Sector (evitando Wikipedia)."""
+    cols_norm = {"symbol":"Ticker","Symbol":"Ticker","ticker":"Ticker",
+                 "name":"Name","Name":"Name","sector":"Sector","Sector":"Sector"}
     if os.path.exists(local_csv):
         df = pd.read_csv(local_csv).rename(columns=cols_norm)
         if "Ticker" not in df.columns:
@@ -33,6 +26,5 @@ def load_sp500_constituents(local_csv: str = "data/sp500_constituents.csv", limi
         df = df.rename(columns=cols_norm)
         return df if limit is None else df.head(limit)
 
-    # Fallback mínimo
-    fallback = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "META"]
+    fallback = ["AAPL","MSFT","GOOGL","AMZN","NVDA","META","JPM","XOM","UNH","HD","LLY","AVGO","BRK-B","V","MA","PG"]
     return pd.DataFrame({"Ticker": fallback if limit is None else fallback[:limit]})

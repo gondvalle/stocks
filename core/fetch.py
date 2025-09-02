@@ -1,19 +1,14 @@
-"""Cliente yfinance con caché en disco."""
+# /sp500_screener/core/fetch.py
+"""Cliente yfinance con caché en disco y helpers robustos."""
 from __future__ import annotations
-
-import json
-import time
+import json, time, math
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Tuple, Any
 
-import math
-try:
-    import pandas as pd
-except Exception:  # pragma: no cover
-    pd = None
+import pandas as pd
 try:
     import yfinance as yf
-except Exception:  # pragma: no cover
+except Exception:
     class _YF:
         def __getattr__(self, _):
             raise RuntimeError("yfinance no disponible")
@@ -21,26 +16,23 @@ except Exception:  # pragma: no cover
 
 from .config import CACHE_DIR
 
-CACHE_DIR.mkdir(parents=True, exist_ok=True)
-
-
 def disk_cache(ttl_hours: int = 24) -> Callable:
     def decorator(func: Callable) -> Callable:
-        def wrapper(ticker: str):
-            cache_file = CACHE_DIR / f"{func.__name__}_{ticker}.json"
+        def wrapper(*args, **kwargs):
+            key = func.__name__ + "_" + "_".join([str(a) for a in args])
+            cache_file = CACHE_DIR / f"{key}.json"
             if cache_file.exists() and time.time() - cache_file.stat().st_mtime < ttl_hours * 3600:
                 try:
                     with open(cache_file, "r") as f:
                         data = json.load(f)
-                    if data.get("type") == "dataframe" and pd is not None:
+                    if data.get("type") == "dataframe":
                         return pd.read_json(data["value"], orient="split")
-                    else:
-                        return data["value"]
+                    return data["value"]
                 except Exception:
                     pass
-            result = func(ticker)
+            result = func(*args, **kwargs)
             try:
-                if pd is not None and isinstance(result, pd.DataFrame):
+                if isinstance(result, pd.DataFrame):
                     payload = {"type": "dataframe", "value": result.to_json(orient="split")}
                 else:
                     payload = {"type": "object", "value": result}
@@ -52,65 +44,56 @@ def disk_cache(ttl_hours: int = 24) -> Callable:
         return wrapper
     return decorator
 
-
 @disk_cache()
-def get_info(ticker: str) -> dict:
+def yf_safe_info(ticker: str) -> dict:
     try:
         return yf.Ticker(ticker).info
     except Exception:
         return {}
 
-
 @disk_cache()
-def get_income_stmt(ticker: str):
-    try:
-        return yf.Ticker(ticker).income_stmt
-    except Exception:
-        return pd.DataFrame() if pd is not None else {}
-
-
-@disk_cache()
-def get_balance_sheet(ticker: str):
-    try:
-        return yf.Ticker(ticker).balance_sheet
-    except Exception:
-        return pd.DataFrame() if pd is not None else {}
-
-
-@disk_cache()
-def get_cashflow(ticker: str):
-    try:
-        return yf.Ticker(ticker).cashflow
-    except Exception:
-        return pd.DataFrame() if pd is not None else {}
-
-
-@disk_cache()
-def get_shares_history(ticker: str) -> object:
-    try:
-        return yf.Ticker(ticker).get_shares_full()
-    except Exception:
-        return None
-
-
-def get_price_and_target(ticker: str) -> tuple[float | float, float | float]:
+def yf_price_and_target(ticker: str) -> Tuple[float, float]:
     try:
         tk = yf.Ticker(ticker)
-        price = tk.fast_info.get("lastPrice") if hasattr(tk, "fast_info") else None
+        price = None
+        if hasattr(tk, "fast_info"):
+            price = tk.fast_info.get("lastPrice")
         if price is None:
             hist = tk.history(period="5d")
-            price = float(hist["Close"].iloc[-1]) if hasattr(hist, "empty") and not hist.empty else math.nan
-        target = tk.info.get("targetMeanPrice", math.nan)
+            price = float(hist["Close"].iloc[-1]) if not hist.empty else math.nan
+        info = {}
+        try:
+            info = tk.info
+        except Exception:
+            pass
+        target = info.get("targetMeanPrice", math.nan)
         return price, target
     except Exception:
         return math.nan, math.nan
 
-
-def get_price_history(ticker: str):
+@disk_cache()
+def yf_financials(ticker: str) -> dict:
+    tk = yf.Ticker(ticker)
+    out = {"income": None, "balance": None, "cashflow": None, "shares": None, "info": {}}
     try:
-        hist = yf.Ticker(ticker).history(period="5y")
-        return hist["Close"]
+        out["income"] = tk.income_stmt
+        out["balance"] = tk.balance_sheet
+        out["cashflow"] = tk.cashflow
     except Exception:
-        if pd is not None:
-            return pd.Series(dtype=float)
-        return []
+        pass
+    try:
+        out["shares"] = tk.get_shares_full()
+    except Exception:
+        out["shares"] = None
+    try:
+        out["info"] = tk.info
+    except Exception:
+        out["info"] = {}
+    return out
+
+def get_price_history_close(ticker: str):
+    try:
+        hist = yf.Ticker(ticker).history(period="max")
+        return hist["Close"] if "Close" in hist else pd.Series(dtype=float)
+    except Exception:
+        return pd.Series(dtype=float)

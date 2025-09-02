@@ -1,3 +1,4 @@
+# /sp500_screener/app.py
 import streamlit as st
 from ui.pages import dashboard, screener, stock_detail, sectors, settings
 
@@ -11,7 +12,15 @@ PAGES = {
     "Ajustes": settings,
 }
 
-st.sidebar.title("Navegación")
-page = st.sidebar.radio("Ir a", list(PAGES.keys()))
+with st.sidebar:
+    st.title("Navegación")
+    page = st.radio("Ir a", list(PAGES.keys()))
+    st.markdown("---")
+    st.caption("Screener fundamental S&P 500 (Yahoo Finance / yfinance)")
+
+# Permite navegar al detalle desde query params (?ticker=MSFT)
+qp = st.query_params
+if "ticker" in qp:
+    st.session_state["selected_ticker"] = qp.get("ticker")
 
 PAGES[page].render()
